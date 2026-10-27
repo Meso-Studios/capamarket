@@ -3,7 +3,7 @@
 Credit-only prediction markets (Kalshi/Polymarket style). No money in or out.
 Credits have no cash value.
 
-**Live:** https://marinpalazzolo5-code.github.io/capamarket/
+**Live:** https://meso-studios.github.io/capamarket/
 
 ## How it works
 
@@ -59,8 +59,8 @@ Market pages are `/market/?id=…` (a static site can't pre-render every id).
 ## Supabase dashboard settings (one-time)
 
 1. **Authentication → URL Configuration**
-   - **Site URL:** `https://marinpalazzolo5-code.github.io/capamarket/`
-   - **Redirect URLs:** `https://marinpalazzolo5-code.github.io/capamarket/**` and `http://localhost:3000/**`
+   - **Site URL:** `https://meso-studios.github.io/capamarket/`
+   - **Redirect URLs:** `https://meso-studios.github.io/capamarket/**` and `http://localhost:3000/**`
 2. **Authentication → Sign In / Providers → Email**
    - Supabase's built-in mailer only emails your project's team members, so other people's
      confirmation emails never arrive.
