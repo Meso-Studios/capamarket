@@ -105,27 +105,10 @@ export function SignupForm() {
         const username = String(fd.get("username")).trim().toLowerCase();
         if (!/^[a-z0-9_]{3,20}$/.test(username)) throw new Error("Username: 3–20 chars, a–z, 0–9 or _.");
         if (password.length < 8) throw new Error("Password must be at least 8 characters.");
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: { emailRedirectTo: `${window.location.origin}${BASE_PATH}/onboarding/` },
-        });
-        if (error) throw new Error(/registered/i.test(error.message) ? "That email is already registered." : error.message);
-        if (!data.session) {
-          // Email confirmation is on: claim the username after they confirm and log in.
-          try {
-            localStorage.setItem(PENDING_USERNAME, username);
-          } catch {}
-          return `Check ${email} for a confirmation link, then log in.`;
-        }
-        try {
-          await rpc("claim_username", { p_username: username });
-        } catch (e) {
-          try {
-            localStorage.setItem(PENDING_USERNAME, username);
-          } catch {}
-          throw e;
-        }
+        // Creates a confirmed account server-side (db/api.sql), so no confirmation email is sent.
+        await rpc("sign_up", { p_email: email, p_username: username, p_password: password });
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw new Error("Account created, but logging in failed. Try logging in.");
       }),
     undefined,
   );

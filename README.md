@@ -61,11 +61,9 @@ Market pages are `/market/?id=…` (a static site can't pre-render every id).
 1. **Authentication → URL Configuration**
    - **Site URL:** `https://meso-studios.github.io/capamarket/`
    - **Redirect URLs:** `https://meso-studios.github.io/capamarket/**` and `http://localhost:3000/**`
-2. **Authentication → Sign In / Providers → Email**
-   - Supabase's built-in mailer only emails your project's team members, so other people's
-     confirmation emails never arrive.
-   - Either turn **Confirm email** off, or add your own SMTP (e.g. Gmail with an App Password)
-     under **Authentication → Emails → SMTP Settings**.
+2. **Email sign-up needs no confirmation email.** The sign-up form calls `sign_up` in
+   [`db/api.sql`](db/api.sql), which creates an already-confirmed account, then logs in. The
+   **Confirm email** setting and SMTP don't matter for it.
 3. **Google sign-in**
    - Create an OAuth client (Web application) at https://console.cloud.google.com/apis/credentials
      with the authorized redirect URI `https://zbioxcjilzvyyrangsze.supabase.co/auth/v1/callback`.

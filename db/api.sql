@@ -104,6 +104,43 @@ begin
   update users set username = name where id = u.id;
 end $$;
 
+-- Email + password sign-up with no confirmation email: creates a confirmed Supabase Auth
+-- account (the browser then logs in with signInWithPassword). The trigger above adds the
+-- profile and starting credits.
+create or replace function public.sign_up(p_email text, p_username text, p_password text) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  em text := lower(trim(p_email));
+  name text := lower(trim(p_username));
+  uid uuid := gen_random_uuid();
+begin
+  if em !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' or length(em) > 254 then raise exception 'Enter a valid email.'; end if;
+  if name !~ '^[a-z0-9_]{3,20}$' then raise exception 'Username: 3–20 chars, a–z, 0–9 or _.'; end if;
+  if length(p_password) < 8 then raise exception 'Password must be at least 8 characters.'; end if;
+  if octet_length(p_password) > 72 then raise exception 'Password is too long (72 bytes max).'; end if;
+  -- Light abuse brake: cap brand-new accounts site-wide.
+  if (select count(*) from auth.users where created_at > now() - interval '1 hour') >= 100 then
+    raise exception 'Too many sign-ups right now. Try again in a bit.';
+  end if;
+  if exists (select 1 from auth.users where lower(email) = em) then raise exception 'That email is already registered.'; end if;
+  if exists (select 1 from users where username = name) then raise exception 'That username is taken.'; end if;
+
+  insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+                          raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+                          confirmation_token, recovery_token, email_change_token_new, email_change,
+                          email_change_token_current, phone_change, phone_change_token, reauthentication_token,
+                          is_sso_user, is_anonymous)
+  values ('00000000-0000-0000-0000-000000000000', uid, 'authenticated', 'authenticated', em,
+          extensions.crypt(p_password, extensions.gen_salt('bf', 10)), now(),
+          '{"provider":"email","providers":["email"]}', '{}', now(), now(),
+          '', '', '', '', '', '', '', '', false, false);
+  insert into auth.identities (provider_id, user_id, identity_data, provider, last_sign_in_at, created_at, updated_at)
+  values (uid::text, uid, jsonb_build_object('sub', uid::text, 'email', em, 'email_verified', true), 'email', now(), now(), now());
+  update users set username = name where id = uid;
+exception when unique_violation then
+  raise exception 'That email or username was just taken. Try another.';
+end $$;
+
 create or replace function public.acknowledge_notices() returns void
 language sql security definer set search_path = public as $$
   update user_notices set read_at = now() where user_id = auth.uid() and read_at is null;
@@ -503,7 +540,7 @@ alter default privileges in schema public revoke execute on functions from publi
 
 grant execute on function
   public.get_me(), public.list_markets(text, text, text), public.get_market(int),
-  public.get_leaderboard(), public.get_about()
+  public.get_leaderboard(), public.get_about(), public.sign_up(text, text, text)
 to anon, authenticated;
 
 grant execute on function
