@@ -5,13 +5,15 @@
 import bcrypt from "bcryptjs";
 import pg from "pg";
 
-// Test accounts (email login). Change or delete these before going live.
-const TEST_USERS = [
-  { username: "alice", email: "alice@test.capamarket.local", password: "alice-Test-2026!" },
-  { username: "bob", email: "bob@test.capamarket.local", password: "bob-Test-2026!" },
-  { username: "carol", email: "carol@test.capamarket.local", password: "carol-Test-2026!" },
-  { username: "dave", email: "dave@test.capamarket.local", password: "dave-Test-2026!" },
-];
+// Test accounts (email login). Passwords come from TEST_PASSWORD_<NAME> in .env.local.
+const TEST_USERS = ["alice", "bob", "carol", "dave"].map((username) => ({
+  username,
+  email: `${username}@test.capamarket.local`,
+  password: process.env[`TEST_PASSWORD_${username.toUpperCase()}`],
+}));
+for (const u of TEST_USERS) {
+  if (!u.password || u.password.length < 12) throw new Error(`Set a 12+ char TEST_PASSWORD_${u.username.toUpperCase()} in .env.local`);
+}
 
 const DAY = 864e5;
 const now = Date.now();
@@ -63,21 +65,35 @@ function synthHistory(startT, endT, p0, p1) {
 const client = new pg.Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
 await client.connect();
 
+/**
+ * Creates (or updates) a confirmed Supabase Auth email account. The on_auth_user_created
+ * trigger in db/api.sql creates the matching profile row with the starting 10 credits.
+ */
 async function upsertUser({ username, email, password, isAdmin = false }) {
-  const existing = await client.query("select id from users where email = $1", [email]);
   const hash = await bcrypt.hash(password, 12);
-  if (existing.rows[0]) {
-    await client.query("update users set password_hash = $1, username = $2, is_admin = $3 where id = $4", [
-      hash, username, isAdmin, existing.rows[0].id,
-    ]);
-    return { id: existing.rows[0].id, created: false };
+  const existing = await client.query("select id from auth.users where email = $1", [email]);
+  let id = existing.rows[0]?.id;
+  if (id) {
+    await client.query("update auth.users set encrypted_password = $1, updated_at = now() where id = $2", [hash, id]);
+  } else {
+    ({ rows: [{ id }] } = await client.query(
+      `insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+                               raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+                               confirmation_token, recovery_token, email_change_token_new, email_change,
+                               email_change_token_current, phone_change, phone_change_token, reauthentication_token)
+       values ('00000000-0000-0000-0000-000000000000', gen_random_uuid(), 'authenticated', 'authenticated', $1, $2, now(),
+               '{"provider":"email","providers":["email"]}', '{}', now(), now(), '', '', '', '', '', '', '', '')
+       returning id`,
+      [email, hash],
+    ));
+    await client.query(
+      `insert into auth.identities (provider_id, user_id, identity_data, provider, last_sign_in_at, created_at, updated_at)
+       values ($1::text, $1::uuid, jsonb_build_object('sub', $1::text, 'email', $2::text, 'email_verified', true), 'email', now(), now(), now())`,
+      [id, email],
+    );
   }
-  const { rows } = await client.query(
-    "insert into users (email, username, password_hash, is_admin) values ($1, $2, $3, $4) returning id",
-    [email, username, hash, isAdmin],
-  );
-  await client.query("insert into credit_ledger (user_id, delta, reason) values ($1, 10, 'starting balance')", [rows[0].id]);
-  return { id: rows[0].id, created: true };
+  await client.query("update users set username = $1, is_admin = $2, password_hash = null where id = $3", [username, isAdmin, id]);
+  return { id };
 }
 
 async function ledger(userId, delta, reason, questionId) {

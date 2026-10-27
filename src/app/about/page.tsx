@@ -1,26 +1,22 @@
+"use client";
+
 import Link from "next/link";
-import { one, query } from "@/lib/db";
 import { pct, shortDate } from "@/lib/format";
+import { useRpc } from "@/lib/useRpc";
 
-export const dynamic = "force-dynamic";
+type About = {
+  n: number;
+  correct: number;
+  brier: number | null;
+  recent: { id: number; title: string; outcome: boolean; final_yes_prob: number; resolved_at: string }[];
+};
 
-export default async function AboutPage() {
+export default function AboutPage() {
   // A market counts as "correct" when the crowd's final YES probability was on the
   // verified side of 50%. Brier score is the mean squared error of those forecasts.
-  const [tally, recent] = await Promise.all([
-    one<{ n: number; correct: number; brier: string | null }>(
-      `select count(*)::int n,
-              count(*) filter (where (final_yes_prob > 0.5 and outcome) or (final_yes_prob < 0.5 and not outcome))::int correct,
-              avg(power(final_yes_prob - case when outcome then 1 else 0 end, 2)) brier
-         from questions where status = 'resolved'`,
-    ),
-    query<{ id: number; title: string; outcome: boolean; final_yes_prob: string; resolved_at: Date }>(
-      `select id, title, outcome, final_yes_prob, resolved_at from questions
-        where status = 'resolved' order by resolved_at desc limit 20`,
-    ),
-  ]);
-  const n = tally?.n ?? 0;
-  const accuracy = n ? tally!.correct / n : null;
+  const { data } = useRpc<About>("get_about");
+  const n = data?.n ?? 0;
+  const accuracy = n ? data!.correct / n : null;
 
   return (
     <div className="section">
@@ -29,28 +25,28 @@ export default async function AboutPage() {
 
       <div className="tally num">
         <div>
-          <div className="v">{n}</div>
+          <div className="v">{data ? n : "…"}</div>
           <div className="k">events predicted</div>
         </div>
         <div>
           <div className="v">{accuracy === null ? "—" : pct(accuracy)}</div>
-          <div className="k">accuracy{tally?.brier ? ` · Brier ${Number(tally.brier).toFixed(3)}` : ""}</div>
+          <div className="k">accuracy{data?.brier != null ? ` · Brier ${Number(data.brier).toFixed(3)}` : ""}</div>
         </div>
       </div>
 
-      {recent.length > 0 && (
+      {!!data?.recent.length && (
         <div className="panel" style={{ marginBottom: 32 }}>
           <div className="panel-head"><span>Verified events</span><span>crowd call vs. outcome</span></div>
           <div className="table-scroll">
             <table className="table num">
               <thead><tr><th>Market</th><th className="r">Final YES</th><th className="r">Outcome</th><th className="r">Call</th><th className="r">Verified</th></tr></thead>
               <tbody>
-                {recent.map((r) => {
+                {data.recent.map((r) => {
                   const p = Number(r.final_yes_prob);
                   const right = p !== 0.5 && p > 0.5 === r.outcome;
                   return (
                     <tr key={r.id}>
-                      <td><Link href={`/q/${r.id}`}>{r.title}</Link></td>
+                      <td><Link href={`/market/?id=${r.id}`}>{r.title}</Link></td>
                       <td className="r yes">{pct(p)}</td>
                       <td className={`r ${r.outcome ? "yes" : "no"}`}>{r.outcome ? "YES" : "NO"}</td>
                       <td className="r"><span className={`tag ${right ? "tag-ok" : "tag-no"}`}>{right ? "HIT" : "MISS"}</span></td>

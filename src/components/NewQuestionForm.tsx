@@ -1,11 +1,29 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useActionState } from "react";
-import { createQuestion, type FormState } from "@/app/actions";
+import { useSession } from "@/components/Session";
 import { CATEGORIES } from "@/lib/format";
+import { attempt, rpc, type FormState } from "@/lib/supabase";
 
 export function NewQuestionForm() {
-  const [state, action, pending] = useActionState<FormState, FormData>(createQuestion, undefined);
+  const router = useRouter();
+  const { refresh } = useSession();
+  const [state, action, pending] = useActionState<FormState, FormData>(
+    (_, fd) =>
+      attempt(async () => {
+        const closes = String(fd.get("closes_at") ?? "");
+        const id = await rpc<number>("create_question", {
+          p_title: String(fd.get("title") ?? ""),
+          p_description: String(fd.get("description") ?? ""),
+          p_category: String(fd.get("category") ?? "General"),
+          p_closes_at: closes ? new Date(closes).toISOString() : null,
+        });
+        await refresh();
+        router.push(`/market/?id=${id}`);
+      }),
+    undefined,
+  );
   return (
     <form action={action} className="panel" style={{ maxWidth: 760 }}>
       <div className="panel-head">

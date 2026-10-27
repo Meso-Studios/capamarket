@@ -13,14 +13,6 @@ create table if not exists users (
   created_at    timestamptz not null default now()
 );
 
-create table if not exists sessions (
-  token_hash text primary key,
-  user_id    uuid not null references users(id) on delete cascade,
-  expires_at timestamptz not null,
-  created_at timestamptz not null default now()
-);
-create index if not exists sessions_user_idx on sessions(user_id);
-
 create table if not exists questions (
   id             serial primary key,
   creator_id     uuid not null references users(id) on delete cascade,
@@ -80,14 +72,11 @@ create index if not exists credit_ledger_user_idx on credit_ledger(user_id, crea
 -- Demo markets created by `npm run db:seed` (removable with `npm run db:clear-demo`).
 alter table questions add column if not exists is_demo boolean not null default false;
 
--- ───────── v2: ELO, moderation, admin 2FA ─────────
+-- ───────── v2: ELO, moderation ─────────
 
 alter table users add column if not exists elo integer not null default 100;
 alter table users add column if not exists disabled_at timestamptz;
 alter table users add column if not exists disabled_reason text;
-
--- Admin sessions only carry admin rights once the emailed code was verified.
-alter table sessions add column if not exists mfa_verified boolean not null default false;
 
 -- kind: 'result' (+1 per credit on the verified side, -1 per credit on the other) or 'fine'.
 create table if not exists elo_ledger (
@@ -125,16 +114,6 @@ create table if not exists user_notices (
 );
 create index if not exists user_notices_user_idx on user_notices(user_id, created_at desc);
 
-create table if not exists login_challenges (
-  id          uuid primary key default gen_random_uuid(),
-  user_id     uuid not null references users(id) on delete cascade,
-  code_hash   text not null,
-  attempts    integer not null default 0,
-  expires_at  timestamptz not null,
-  consumed_at timestamptz,
-  created_at  timestamptz not null default now()
-);
-
 -- Backfill ELO results for markets verified before ELO existed, then derive
 -- every balance from the ledger (idempotent).
 insert into elo_ledger (user_id, delta, kind, reason, question_id)
@@ -150,3 +129,18 @@ update users u set elo = 100 + coalesce((select sum(delta) from elo_ledger e whe
 -- v3: school-focused categories; posts in retired categories move to General.
 update questions set category = 'General'
  where category not in ('General', 'Teachers', 'Students', 'Classes', 'District', 'Education City', 'Gossip', 'Snow Days');
+
+-- v4: Supabase Auth owns logins now (see db/api.sql); the old server-side tables go.
+drop table if exists sessions, login_challenges;
+
+-- Lock every table away from Supabase's public API roles. The browser only gets
+-- the security-definer functions in db/api.sql.
+do $$
+declare t text;
+begin
+  for t in select tablename from pg_tables where schemaname = 'public' loop
+    execute format('alter table public.%I enable row level security', t);
+    execute format('revoke all on public.%I from anon, authenticated', t);
+  end loop;
+end $$;
+alter default privileges in schema public revoke all on tables from anon, authenticated;

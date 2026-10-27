@@ -1,10 +1,18 @@
 "use client";
 
 import { useActionState } from "react";
-import { fineUser, warnUser, type FormState } from "@/app/actions";
+import { attempt, rpc, type FormState } from "@/lib/supabase";
 
-export function WarnForm({ userId }: { userId: string }) {
-  const [state, action, pending] = useActionState<FormState, FormData>(warnUser, undefined);
+export function WarnForm({ userId, onDone }: { userId: string; onDone: () => void }) {
+  const [state, action, pending] = useActionState<FormState, FormData>(
+    (_, fd) =>
+      attempt(async () => {
+        await rpc("admin_warn", { p_user: userId, p_message: String(fd.get("message") ?? "") });
+        onDone();
+        return "Warning sent.";
+      }),
+    undefined,
+  );
   return (
     <form action={action} key={state?.ok}>
       <input type="hidden" name="user_id" value={userId} />
@@ -19,8 +27,17 @@ export function WarnForm({ userId }: { userId: string }) {
   );
 }
 
-export function FineForm({ userId }: { userId: string }) {
-  const [state, action, pending] = useActionState<FormState, FormData>(fineUser, undefined);
+export function FineForm({ userId, onDone }: { userId: string; onDone: () => void }) {
+  const [state, action, pending] = useActionState<FormState, FormData>(
+    (_, fd) =>
+      attempt(async () => {
+        const amount = Math.floor(Number(fd.get("amount")));
+        await rpc("admin_fine", { p_user: userId, p_amount: amount, p_reason: String(fd.get("reason") ?? "") });
+        onDone();
+        return `Fined ${amount} ELO.`;
+      }),
+    undefined,
+  );
   return (
     <form action={action} key={state?.ok}>
       <input type="hidden" name="user_id" value={userId} />

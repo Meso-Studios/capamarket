@@ -1,27 +1,14 @@
-import { getCurrentUser } from "@/lib/auth";
-import { query } from "@/lib/db";
-import { pct } from "@/lib/format";
+"use client";
 
-export const dynamic = "force-dynamic";
+import { Loading, useSession } from "@/components/Session";
+import { pct } from "@/lib/format";
+import { useRpc } from "@/lib/useRpc";
 
 type Row = { id: string; username: string; elo: number; hit: number; miss: number; markets: number; fines: number };
 
-export default async function LeaderboardPage() {
-  const me = await getCurrentUser();
-  const rows = await query<Row>(
-    `select u.id, u.username, u.elo,
-            coalesce(sum(v.credits) filter (where q.status = 'resolved' and v.side = q.outcome), 0)::int hit,
-            coalesce(sum(v.credits) filter (where q.status = 'resolved' and v.side <> q.outcome), 0)::int miss,
-            count(distinct v.question_id) filter (where q.status = 'resolved' and v.credits > 0)::int markets,
-            (select coalesce(-sum(delta), 0)::int from elo_ledger e where e.user_id = u.id and e.kind = 'fine') fines
-       from users u
-       left join votes v on v.user_id = u.id
-       left join questions q on q.id = v.question_id
-      where u.username is not null and not u.is_admin and u.disabled_at is null
-      group by u.id
-      order by u.elo desc, u.created_at asc
-      limit 200`,
-  );
+export default function LeaderboardPage() {
+  const { me } = useSession();
+  const { data: rows, error, loading } = useRpc<Row[]>("get_leaderboard");
 
   return (
     <div className="section">
@@ -31,7 +18,11 @@ export default async function LeaderboardPage() {
         credit on the wrong side is −1. Admin fines also come off ELO.
       </p>
 
-      {rows.length === 0 ? (
+      {error ? (
+        <div className="msg msg-err">ERR: {error}</div>
+      ) : loading && !rows ? (
+        <Loading />
+      ) : !rows?.length ? (
         <div className="empty">No traders yet.</div>
       ) : (
         <div className="panel">

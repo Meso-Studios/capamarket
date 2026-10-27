@@ -1,12 +1,23 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { reportQuestion, type FormState } from "@/app/actions";
+import { attempt, rpc, type FormState } from "@/lib/supabase";
 import { REPORT_REASONS } from "@/lib/format";
 
 export function ReportButton({ questionId, alreadyReported }: { questionId: number; alreadyReported: boolean }) {
   const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState<FormState, FormData>(reportQuestion, undefined);
+  const [state, action, pending] = useActionState<FormState, FormData>(
+    (_, fd) =>
+      attempt(async () => {
+        await rpc("report_question", {
+          p_question_id: questionId,
+          p_reason: String(fd.get("reason") ?? "Other"),
+          p_details: String(fd.get("details") ?? ""),
+        });
+        return "Reported. An admin will review it.";
+      }),
+    undefined,
+  );
 
   if (alreadyReported || state?.ok) {
     return <div className="hint" style={{ textAlign: "center" }}>⚑ {state?.ok ?? "You reported this market. An admin will review it."}</div>;

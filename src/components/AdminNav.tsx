@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 
 export function AdminNav({ active }: { active: "markets" | "users" }) {

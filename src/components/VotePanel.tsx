@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useActionState, useEffect, useState } from "react";
-import { castVote, type FormState } from "@/app/actions";
+import { attempt, rpc, type FormState } from "@/lib/supabase";
 
 type Props = {
   questionId: number;
@@ -12,12 +12,28 @@ type Props = {
   noStake: number;
   open: boolean;
   user: { credits: number; hasFree: boolean; hasVoted: boolean } | null;
+  /** Called after a successful vote so the page and header can reload. */
+  onVoted: () => void;
 };
 
 const pct = (p: number) => `${Math.round(p * 100)}%`;
 
-export function VotePanel({ questionId, yesVotes, noVotes, yesStake, noStake, open, user }: Props) {
-  const [state, action, pending] = useActionState<FormState, FormData>(castVote, undefined);
+export function VotePanel({ questionId, yesVotes, noVotes, yesStake, noStake, open, user, onVoted }: Props) {
+  const [state, action, pending] = useActionState<FormState, FormData>(
+    (_, fd) =>
+      attempt(async () => {
+        const side = fd.get("side") === "yes";
+        const r = await rpc<{ weight: number; bonus: number }>("cast_vote", {
+          p_question_id: questionId,
+          p_side: side,
+          p_credits: Number(fd.get("credits") ?? 0),
+        });
+        onVoted();
+        const msg = `+${r.weight} vote${r.weight > 1 ? "s" : ""} on ${side ? "YES" : "NO"}.`;
+        return r.bonus ? `${msg} LUCKY ROLL: +${r.bonus} credits!` : msg;
+      }),
+    undefined,
+  );
   const [side, setSide] = useState<"yes" | "no">("yes");
   const [credits, setCredits] = useState(0);
 

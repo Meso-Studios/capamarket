@@ -1,9 +1,11 @@
-import Link from "next/link";
-import { getCurrentUser } from "@/lib/auth";
-import { query } from "@/lib/db";
-import { ago, CATEGORIES, pct, shortDate, yesProb } from "@/lib/format";
+"use client";
 
-export const dynamic = "force-dynamic";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
+import { Loading, useSession } from "@/components/Session";
+import { ago, CATEGORIES, pct, shortDate, yesProb } from "@/lib/format";
+import { useRpc } from "@/lib/useRpc";
 
 type Row = {
   id: number;
@@ -13,35 +15,30 @@ type Row = {
   outcome: boolean | null;
   yes_votes: number;
   no_votes: number;
-  closes_at: Date | null;
-  created_at: Date;
+  closes_at: string | null;
+  created_at: string;
+  is_demo: boolean;
   username: string | null;
   voters: number;
-  is_demo: boolean;
 };
 
-const SORTS = { hot: "(q.yes_votes + q.no_votes) desc", new: "q.created_at desc", closing: "q.closes_at asc nulls last" };
+const SORTS = ["hot", "new", "closing"];
 
-export default async function Home({
-  searchParams,
-}: {
-  searchParams: Promise<{ tab?: string; sort?: string; cat?: string }>;
-}) {
-  const sp = await searchParams;
-  const isAdmin = !!(await getCurrentUser())?.is_admin;
-  const tab = sp.tab === "resolved" ? "resolved" : "open";
-  const sort = (sp.sort && sp.sort in SORTS ? sp.sort : "hot") as keyof typeof SORTS;
-  const cat = CATEGORIES.includes(sp.cat ?? "") ? sp.cat! : null;
-
-  const rows = await query<Row>(
-    `select q.id, q.title, q.category, q.status, q.outcome, q.yes_votes, q.no_votes, q.closes_at, q.created_at, q.is_demo,
-            u.username, (select count(distinct user_id)::int from votes v where v.question_id = q.id) voters
-       from questions q join users u on u.id = q.creator_id
-      where q.status = $1 and ($2::text is null or q.category = $2)
-      order by ${tab === "resolved" ? "q.resolved_at desc" : SORTS[sort]}
-      limit 100`,
-    [tab, cat],
+export default function Home() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <Markets />
+    </Suspense>
   );
+}
+
+function Markets() {
+  const sp = useSearchParams();
+  const { me } = useSession();
+  const tab = sp.get("tab") === "resolved" ? "resolved" : "open";
+  const sort = SORTS.includes(sp.get("sort") ?? "") ? sp.get("sort")! : "hot";
+  const cat = CATEGORIES.includes(sp.get("cat") ?? "") ? sp.get("cat")! : null;
+  const { data: rows, error, loading } = useRpc<Row[]>("list_markets", { p_tab: tab, p_sort: sort, p_cat: cat });
 
   const href = (p: Record<string, string | null>) => {
     const next = { tab, sort, cat, ...p };
@@ -58,7 +55,7 @@ export default async function Home({
         </div>
         {tab === "open" && (
           <div className="seg">
-            {Object.keys(SORTS).map((s) => (
+            {SORTS.map((s) => (
               <Link key={s} href={href({ sort: s })} className={sort === s ? "on" : ""}>{s}</Link>
             ))}
           </div>
@@ -72,7 +69,11 @@ export default async function Home({
         </div>
       </div>
 
-      {rows.length === 0 ? (
+      {error ? (
+        <div className="msg msg-err">ERR: {error}</div>
+      ) : loading && !rows ? (
+        <Loading />
+      ) : !rows?.length ? (
         <div className="empty">
           {tab === "open" ? (
             <>
@@ -88,10 +89,13 @@ export default async function Home({
             const p = yesProb(q.yes_votes, q.no_votes);
             const votes = q.yes_votes + q.no_votes;
             return (
-              <Link key={q.id} href={`/q/${q.id}`} className="card">
+              <Link key={q.id} href={`/market/?id=${q.id}`} className="card">
                 <div className="card-meta">
-                  <span>{q.category}{q.is_demo && <span className="tag" style={{ marginLeft: 8, fontSize: 10, padding: "0 4px" }}>demo</span>}</span>
-                  <span title={isAdmin ? "Visible to admin only" : undefined}>{isAdmin ? `@${q.username}` : "anon"}</span>
+                  <span>
+                    {q.category}
+                    {q.is_demo && <span className="tag" style={{ marginLeft: 8, fontSize: 10, padding: "0 4px" }}>demo</span>}
+                  </span>
+                  <span title={me?.is_admin ? "Visible to admin only" : undefined}>{q.username ? `@${q.username}` : "anon"}</span>
                 </div>
                 <div className="card-title">{q.title}</div>
                 <div className="card-odds">
@@ -99,9 +103,7 @@ export default async function Home({
                     <span className="big-pct yes num">{pct(p)}</span> <span className="dim">YES</span>
                   </div>
                   {q.status === "resolved" ? (
-                    <span className={`tag ${q.outcome ? "tag-yes" : "tag-no"}`}>
-                      Verified {q.outcome ? "YES" : "NO"}
-                    </span>
+                    <span className={`tag ${q.outcome ? "tag-yes" : "tag-no"}`}>Verified {q.outcome ? "YES" : "NO"}</span>
                   ) : (
                     <span className="no num">{pct(1 - p)} NO</span>
                   )}
